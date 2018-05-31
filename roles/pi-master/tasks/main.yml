@@ -14,6 +14,7 @@
     - "ca-certificates"
     - "software-properties-common"
     - "cron"
+  become: true
 
 - name: Get upstream APT GPG key
   apt_key:
