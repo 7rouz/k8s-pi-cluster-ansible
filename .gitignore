@@ -1,5 +1,6 @@
-./iventory/hosts
+iventory/hosts
 *.retry
 */*.retry
 */*/*/*.retry
 
+dwc_otg.lpm_enable=0 console=serial0,115200 console=tty1 root=PARTUUID=19d2ce4f-02 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait
