@@ -1,0 +1,174 @@
+---
+- name: Fail if Docker version is < 17.03
+  fail:
+    msg: "docker_version must be >= 17.03, yours is set to {{ docker_version }}."
+  when: docker_version is version_compare("17.03", "<")
+
+# sudo apt-get remove docker docker-engine docker.io
+- name: Remove potential installed docker packages
+  apt:
+    name: "{{ item }}"
+    state: "absent"
+  with_items:
+    - "docker"
+    - "docker-engine"
+    - "docker.io"
+    - "docker-ce"
+  become: True
+
+- name: Install Docker and role dependencies
+  apt:
+    name: "{{ item }}"
+    state: "present"
+    install_recommends: False
+    update_cache: True
+  with_items:
+    - "apt-transport-https"
+    - "ca-certificates"
+    - "software-properties-common"
+    - "cron"
+  become: True
+
+- name: Get upstream APT GPG key
+  apt_key:
+    id: "{{ docker_apt_key }}"
+    keyserver: "{{ ansible_local.core.keyserver
+                   if (ansible_local|d() and ansible_local.core|d() and
+                       ansible_local.core.keyserver)
+                   else 'hkp://pool.sks-keyservers.net' }}"
+    state: "present"
+
+- name: Configure upstream APT repository
+  apt_repository:
+    repo: "{{ docker_repository }}"
+    state: "present"
+    update_cache: True
+  become: True
+
+- name: Install Docker
+  apt:
+    name: "docker-ce={{ docker_apt_package_name }}"
+    state: "present"
+    update_cache: True
+    install_recommends: False
+    cache_valid_time: "{{ docker_apt_cache_time }}"
+  become: True
+
+- name: Remove Upstart config file
+  file:
+    path: "/etc/default/docker"
+    state: "absent"
+  become: true
+
+- name: Ensure systemd directory exists
+  file:
+    path: "/etc/systemd/system"
+    state: "directory"
+    owner: "root"
+    group: "root"
+    mode: "0755"
+
+- name: Generate systemd unit file
+  template:
+    src: "docker.service.j2"
+    dest: "/etc/systemd/system/docker.service"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: True
+  register: docker_register_systemd_service
+
+- name: Reload systemd daemon
+  command: "systemctl daemon-reload"
+  notify: ["Restart Docker"]
+  become: True
+  when: (docker_register_systemd_service and
+         docker_register_systemd_service is changed)
+
+- name: Add specific users to "docker" group
+  user:
+    name: "{{ item }}"
+    groups: "docker"
+    append: True
+  become: True
+  with_items: "{{ docker_users }}"
+  when: docker_users
+
+# disable swap
+# sudo dphys-swapfile swapoff && sudo dphys-swapfile uninstall && sudo update-rc.d dphys-swapfile remove
+
+- name: install dphys-swapoff
+  apt:
+    name: "dphys-swapfile"
+    state: "present"
+    update_cache: True
+    install_recommends: False
+  become: true
+
+## this task could be removed since the uninstall call it
+- name: disable swap
+  shell: dphys-swapfile swapoff
+  become: True
+
+- name: get rid of swap files and reclaim its disk space
+  shell: dphys-swapfile uninstall
+  become: True
+
+- name: remove dphys-swapfile start up service
+  shell: update-rc.d dphys-swapfile remove
+  become: True
+
+# TODO :
+# update /boot/cmdline.txt
+- name: read /boot/cmdline.txt file
+  shell: cat /boot/cmdline.txt
+  register: cmdline_file
+  become: True
+
+# add cgroup_enable=cpuset cgroup_memory=1tothe same line
+
+- name: update /boot/cmdline.txt if cgroup_enable=cpuset cgroup_memory=1 not in file
+  lineinfile:
+    path: /boot/cmdline.txt
+    regexp: " rootwait$"
+    insertafter: " rootwait"
+    line: '{{ cmdline_file.stdout }} cgroup_enable=cpuset cgroup_memory=1'
+  become: True
+  when: cmdline_file.stdout.find('cgroup_enable=cpuset cgroup_memory=1') == -1
+
+
+# Reboot
+# Send the reboot command
+- name: Reboot pi
+  shell: sleep 2 && reboot
+  become: true
+  async: 30
+  poll: 0
+  ignore_errors: true
+
+# This pause is mandatory, otherwise the existing control connection gets reused!
+- name: wait for pi to reboot
+  pause: seconds=30
+
+# Now we will run a local 'ansible -m ping' on this host until it returns.
+# This works with the existing ansible hosts inventory and so any custom ansible_ssh_hosts definitions are being used
+- name: ping pi untill it responds
+  local_action: shell ansible -u {{ ansible_user_id }} -m ping {{ inventory_hostname }}
+  register: result
+  until: result.rc == 0
+  retries: 30
+  delay: 10
+
+# Add repo lists & install kubeadm
+- name: add repo for kubeadm
+  shell: |
+    curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+    echo "deb http://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+  become: True
+
+- name: install kubadm
+  apt:
+    name: "kubeadm"
+    state: "present"
+    update_cache: True
+  become: True

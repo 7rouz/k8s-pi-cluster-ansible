@@ -30,6 +30,7 @@
     repo: "{{ docker_repository }}"
     state: "present"
     update_cache: True
+  become: true
 
 - name: Install Docker
   apt:
@@ -38,6 +39,7 @@
     update_cache: True
     install_recommends: False
     cache_valid_time: "{{ docker_apt_cache_time }}"
+  become: ture
 
 - name: Remove Upstart config file
   file:
