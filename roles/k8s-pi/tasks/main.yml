@@ -132,9 +132,9 @@
     path: /boot/cmdline.txt
     regexp: " rootwait$"
     insertafter: " rootwait"
-    line: '{{ cmdline_file.stdout }} cgroup_enable=cpuset cgroup_memory=1'
+    line: '{{ cmdline_file.stdout }} cgroup_enable=cpuset cgroup_enable=memory'
   become: True
-  when: cmdline_file.stdout.find('cgroup_enable=cpuset cgroup_memory=1') == -1
+  when: cmdline_file.stdout.find('cgroup_enable=cpuset cgroup_enable=memory') == -1
 
 
 # Reboot
@@ -159,6 +159,13 @@
   retries: 30
   delay: 10
 
+# uninstall kubeadm
+- name: Remove kubeadm
+  apt:
+    name: "kubeadm"
+    state: "absent"
+  become: True
+
 # Add repo lists & install kubeadm
 - name: add repo for kubeadm
   shell: |
@@ -168,7 +175,7 @@
 
 - name: install kubadm
   apt:
-    name: "kubeadm"
+    name: "kubeadm=1.10.2-00"
     state: "present"
     update_cache: True
   become: True
