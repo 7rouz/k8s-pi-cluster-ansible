@@ -1,4 +1,4 @@
 ---
-- hosts: master
+- hosts: all
   roles:
-    - pi-master
+    - k8s-pi
