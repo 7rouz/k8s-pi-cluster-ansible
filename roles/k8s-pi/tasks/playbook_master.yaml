@@ -1,0 +1,17 @@
+---
+- hosts: master
+  tasks:
+  - name: kubeadm init cluster
+    command: "kubeadm init"
+    become: True
+
+  - name: create kube conf directory
+    command: "mkdir -p $HOME/.kube"
+
+  - name: copy kube cluster conf 
+    command: "cp -i /etc/kubernetes/admin.conf $HOME/.kube/config"
+    become: True
+  
+  - name: change rights over kube cluster config 
+    command: chown $(id -u):$(id -g) $HOME/.kube/config
+    become: True
