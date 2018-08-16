@@ -173,9 +173,13 @@
     echo "deb http://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
   become: True
 
-- name: install kubadm
+- name: install kubelet kubeadm kubectl 
   apt:
-    name: "kubeadm=1.10.2-00"
+    name: {{ item }}
     state: "present"
     update_cache: True
   become: True
+  with_items:
+    - kubelet
+    - kubeadm
+    - kubectl
