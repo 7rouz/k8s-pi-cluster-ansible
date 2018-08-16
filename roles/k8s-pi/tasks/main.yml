@@ -175,7 +175,7 @@
 
 - name: install kubelet kubeadm kubectl 
   apt:
-    name: {{ item }}
+    name: "{{ item }}"
     state: "present"
     update_cache: True
   become: True
