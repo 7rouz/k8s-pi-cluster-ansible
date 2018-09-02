@@ -1,14 +1,38 @@
 ---
-#- include: playbook_nodes.yaml
-- name: Fail if Docker version is < 17.03
-  fail:
-    msg: "docker_version must be >= 17.03, yours is set to {{ docker_version }}."
-  when: docker_version is version_compare("17.03", "<")
+###############################################################################
+##### Begin with a clean up                                               #####
+###############################################################################
+
+# kubeadm reset
+- name: Kubeadm reset to remove cluster config
+  shell: kubeadm reset -f
+  become: True
+  register: kubeadm_reset
+  failed_when: kubeadm_reset.rc != 0 and kubeadm_reset.rc != 127
+  tags:
+    - clean_up
+    - kube
+
+# uninstall kubeadm kubectl and kubelet
+- name: Remove kubeadm kubectl and kubelet
+  apt:
+    name: "{{ item }}"
+    purge: True
+    state: "absent"
+  become: True
+  with_items:
+    - kubelet
+    - kubeadm
+    - kubectl
+  tags:
+    - clean_up
+    - kube
 
 # sudo apt-get remove docker docker-engine docker.io
 - name: Remove potential installed docker packages
   apt:
     name: "{{ item }}"
+    purge: True
     state: "absent"
   with_items:
     - "docker"
@@ -16,6 +40,20 @@
     - "docker.io"
     - "docker-ce"
   become: True
+  tags:
+    - clean_up
+    - docker
+
+###############################################################################
+##### Begin installing docker and kubeadm                                 #####
+###############################################################################
+
+- name: Fail if Docker version is < 17.03
+  fail:
+    msg: "docker_version must be >= 17.03, yours is set to {{ docker_version }}."
+  when: docker_version is version_compare("17.03", "<")
+  tags:
+    - docker
 
 - name: Install Docker and role dependencies
   apt:
@@ -29,6 +67,8 @@
     - "software-properties-common"
     - "cron"
   become: True
+  tags:
+    - docker
 
 - name: Get upstream APT GPG key
   apt_key:
@@ -38,6 +78,8 @@
                        ansible_local.core.keyserver)
                    else 'hkp://pool.sks-keyservers.net' }}"
     state: "present"
+  tags:
+    - docker
 
 - name: Configure upstream APT repository
   apt_repository:
@@ -45,6 +87,8 @@
     state: "present"
     update_cache: True
   become: True
+  tags:
+    - docker
 
 - name: Install Docker
   apt:
@@ -54,12 +98,16 @@
     install_recommends: False
     cache_valid_time: "{{ docker_apt_cache_time }}"
   become: True
+  tags:
+    - docker
 
 - name: Remove Upstart config file
   file:
     path: "/etc/default/docker"
     state: "absent"
   become: true
+  tags:
+    - docker
 
 - name: Ensure systemd directory exists
   file:
@@ -68,6 +116,8 @@
     owner: "root"
     group: "root"
     mode: "0755"
+  tags:
+    - docker
 
 - name: Generate systemd unit file
   template:
@@ -78,6 +128,8 @@
     mode: "0644"
   become: True
   register: docker_register_systemd_service
+  tags:
+    - docker
 
 - name: Reload systemd daemon
   command: "systemctl daemon-reload"
@@ -85,6 +137,8 @@
   become: True
   when: (docker_register_systemd_service and
          docker_register_systemd_service is changed)
+  tags:
+    - docker
 
 - name: Add specific users to "docker" group
   user:
@@ -94,6 +148,8 @@
   become: True
   with_items: "{{ docker_users }}"
   when: docker_users
+  tags:
+    - docker
 
 # disable swap
 # sudo dphys-swapfile swapoff && sudo dphys-swapfile uninstall && sudo update-rc.d dphys-swapfile remove
@@ -105,19 +161,26 @@
     update_cache: True
     install_recommends: False
   become: true
-
+  tags:
+    - kube
 ## this task could be removed since the uninstall call it
 - name: disable swap
   shell: dphys-swapfile swapoff
   become: True
+  tags:
+    - kube
 
 - name: get rid of swap files and reclaim its disk space
   shell: dphys-swapfile uninstall
   become: True
+  tags:
+    - kube
 
 - name: remove dphys-swapfile start up service
   shell: update-rc.d dphys-swapfile remove
   become: True
+  tags:
+    - kube
 
 # TODO :
 # update /boot/cmdline.txt
@@ -125,6 +188,8 @@
   shell: cat /boot/cmdline.txt
   register: cmdline_file
   become: True
+  tags:
+    - kube
 
 # add cgroup_enable=cpuset cgroup_memory=1tothe same line
 
@@ -136,7 +201,8 @@
     line: '{{ cmdline_file.stdout }} cgroup_enable=cpuset cgroup_enable=memory'
   become: True
   when: cmdline_file.stdout.find('cgroup_enable=cpuset cgroup_enable=memory') == -1
-
+  tags:
+    - kube
 
 # Reboot
 # Send the reboot command
@@ -146,10 +212,16 @@
   async: 30
   poll: 0
   ignore_errors: true
+  tags:
+    - reboot
+    - kube
 
 # This pause is mandatory, otherwise the existing control connection gets reused!
 - name: wait for pi to reboot
   pause: seconds=30
+  tags:
+    - reboot
+    - kube
 
 # Now we will run a local 'ansible -m ping' on this host until it returns.
 # This works with the existing ansible hosts inventory and so any custom ansible_ssh_hosts definitions are being used
@@ -159,13 +231,9 @@
   until: result.rc == 0
   retries: 30
   delay: 10
-
-# uninstall kubeadm
-- name: Remove kubeadm
-  apt:
-    name: "kubeadm"
-    state: "absent"
-  become: True
+  tags:
+    - reboot
+    - kube
 
 # Add repo lists & install kubeadm
 - name: add repo for kubeadm
@@ -173,6 +241,8 @@
     curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
     echo "deb http://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
   become: True
+  tags:
+    - kube
 
 - name: install kubelet kubeadm kubectl 
   apt:
@@ -184,3 +254,6 @@
     - kubelet
     - kubeadm
     - kubectl
+  tags:
+    - kube
+
