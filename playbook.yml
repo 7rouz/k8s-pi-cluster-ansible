@@ -2,3 +2,86 @@
 - hosts: all
   roles:
     - k8s-pi
+- hosts: master
+  tasks:
+    - name: kubeadm resest just in case
+      shell: kubeadm reset -f
+      become: True
+      tags:
+        - clean
+        - init_cluster
+
+    - name: generate a token 
+      shell: kubeadm token generate
+      become: True
+      register: token
+      tags:
+        - init_cluster
+
+    - name: initialize kube cluster
+      shell: kubeadm init --token "{{token.stdout}}"
+      become: True
+      tags:
+        - init_cluster
+
+    - name: get HOME path of user pi
+      shell: echo $HOME
+      register: pi_home
+      tags:
+        - init_cluster
+        - init_kubectl
+
+    # Due to problem getting home path of the right user 
+    # register the path in a var 
+    - name: Create a directory for kube conf
+      file:
+        path: "{{pi_home.stdout}}/.kube"
+        state: directory
+        mode:  0755
+      tags:
+        - init_kubectl
+        - init_cluster
+    # mkdir -p $HOME/.kube           
+    # sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config 
+    # sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+    - name: copy admin.conf using shell
+      shell: cp -i /etc/kubernetes/admin.conf  "{{pi_home.stdout}}/.kube/config"
+      become: True
+      tags:
+        - init_cluster
+        - init_kubectl
+
+    #- name: copy conf from /etc/kubernetes to .kube
+    #  copy:
+    #    src: /etc/kubernetes/admin.conf
+    #    det: ~/.kube/config
+    #  become: True
+    #  tags:
+    #    - test
+
+    - name: get user id
+      shell: id -u
+      register: user_id
+      tags: 
+        - init_cluster
+        - init_kubectl
+
+    - name: get user group
+      shell: id -g
+      register: user_group_id
+      tags:
+        - init_cluster
+        - init_kubectl
+
+    - name: change rights of config file
+      file:
+        path:  "{{pi_home.stdout}}/.kube/config"
+        owner: "{{user_id.stdout}}"
+        group: "{{user_group_id.stdout}}"
+        mode: 0600
+      become: yes
+      tags:
+        - init_cluster
+        - init_kubectl   
+ 
