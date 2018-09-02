@@ -11,6 +11,23 @@
         - clean
         - init_cluster
 
+   #  - shell: kubeadm token create --print-join-command
+   #    register: results
+   #  - debug:
+   #      var: results.stdout
+   #  - set_fact:
+   #      token: "{{ results.stdout | regex_search(regexp, '\\2') | first }}"
+   #    vars:
+   #      regexp: '([^\s]+\s){4}([^\s]+)'
+   #  - debug:
+   #      var: token
+   #  - set_fact:
+   #      hash: "{{ results.stdout | regex_search(regexp, '\\2') | first }}"
+   #    vars:
+   #      regexp: '([^\s]+\s){6}([^\s]+)'
+   #  - debug:
+   #      var: hash
+
     - name: generate a token 
       shell: kubeadm token generate
       become: True
@@ -24,6 +41,13 @@
       tags:
         - init_cluster
 
+    # CONFIGURE Kubectl:
+    # > mkdir -p $HOME/.kube           
+    # > sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config 
+    # > sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+    # Due to problem getting home path of the right user 
+    # register the path in a var
     - name: get HOME path of user pi
       shell: echo $HOME
       register: pi_home
@@ -31,8 +55,14 @@
         - init_cluster
         - init_kubectl
 
-    # Due to problem getting home path of the right user 
-    # register the path in a var 
+    - name: Remove .kube directory 
+      file:
+        path: "{{pi_home.stdout}}/.kube/"
+        state: absent
+      tags:
+        - init_kubectl
+        - clean_up
+
     - name: Create a directory for kube conf
       file:
         path: "{{pi_home.stdout}}/.kube"
@@ -41,9 +71,6 @@
       tags:
         - init_kubectl
         - init_cluster
-    # mkdir -p $HOME/.kube           
-    # sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config 
-    # sudo chown $(id -u):$(id -g) $HOME/.kube/config
 
     - name: copy admin.conf using shell
       shell: cp -i /etc/kubernetes/admin.conf  "{{pi_home.stdout}}/.kube/config"
@@ -51,14 +78,6 @@
       tags:
         - init_cluster
         - init_kubectl
-
-    #- name: copy conf from /etc/kubernetes to .kube
-    #  copy:
-    #    src: /etc/kubernetes/admin.conf
-    #    det: ~/.kube/config
-    #  become: True
-    #  tags:
-    #    - test
 
     - name: get user id
       shell: id -u
@@ -84,4 +103,8 @@
       tags:
         - init_cluster
         - init_kubectl   
- 
+
+- hosts: nodes 
+  tasks:
+    - name: Join cluster 
+      shell: kubeadm join   
